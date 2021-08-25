@@ -1,0 +1,10 @@
+README.md
+setup.py
+PekatVisionSDK/__init__.py
+PekatVisionSDK/pekat_vision_instance.py
+pekat_vision_sdk.egg-info/PKG-INFO
+pekat_vision_sdk.egg-info/SOURCES.txt
+pekat_vision_sdk.egg-info/dependency_links.txt
+pekat_vision_sdk.egg-info/requires.txt
+pekat_vision_sdk.egg-info/top_level.txt
+test/test_pekat_vision_instance.py
