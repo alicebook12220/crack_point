@@ -1,6 +1,4 @@
-import gc
 import time
-import traceback
 import pymcprotocol
 
 LAB_USED=0
