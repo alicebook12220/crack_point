@@ -6,10 +6,12 @@ import datetime
 import glob
 import os
 import ftplib
+import csv
 
 host = "192.168.3.100"
 username = "ftpuser"
 password = "ftp@12345678"
+camera_name = "camera_1"
 
 def ftp_upload(file_path, ftp_path):
     ftp_session = ftplib.FTP(host)
@@ -18,6 +20,18 @@ def ftp_upload(file_path, ftp_path):
     ftp_session.storbinary('STOR ' + ftp_path, file)
     file.close()
     ftp_session.quit()
+
+def csv_write(mode="header", today="test", datetime="test", result=0):
+    data = ""
+    if mode == "header":
+        data = ['datetime', 'result']
+    else:
+        data = [datetime, result]
+
+    with open('log/' + today + '_' + camera_name + '.csv', 'a', encoding='UTF8', newline='') as f:
+        writer = csv.writer(f)
+        # write the data
+        writer.writerow(data)
 
 net = cv2.dnn_DetectionModel('C:/Users/user/Desktop/crack_point/python/videoCapture/toshiba-teli-pekatvision-main/cfg/custom-yolov4-3l-tiny.cfg', 'C:/Users/user/Desktop/crack_point/python/videoCapture/toshiba-teli-pekatvision-main/backup/custom-yolov4-tiny_last.weights')
 net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
@@ -85,6 +99,8 @@ if (cameras):
         # Wait for image 2000ms
         w = cam.waitForImage(2000)
         time_OK = time.time()
+        csv_time = time.time()
+        #today_old = str(datetime.date.today())
         if (w):
             min1_defectContinue = []
             min5_defectHave = []
@@ -95,7 +111,12 @@ if (cameras):
             find_crack_t1 = 0
             find_crack_t5 = 0
             while(True):
-                time_now = str(datetime.date.today())
+                today = str(datetime.date.today())
+                isExists = os.path.exists(today + '_' + camera_name + '.csv')
+                if not isExists:
+                    csv_write("header", today)
+                #if today != today_old:
+                    
                 '''
                 if time_temp != time_now:
                     time_temp = time_now
@@ -107,10 +128,10 @@ if (cameras):
                 imshow = cv2.resize(img, (1024,768))
                 cv2.imshow('Realtime Show Cam1', imshow)
                 
-                output_path = predict_path + str(time_now)
+                output_path = predict_path + str(today)
                 isExists = os.path.exists(output_path)
                 if not isExists:
-                    #print("建立日期目錄:", time_now)
+                    #print("建立日期目錄:", today)
                     #os.makedirs(output_path)
                     os.makedirs(output_path + "/OK/")
                     #os.makedirs(output_path + "NG/")
@@ -230,9 +251,21 @@ if (cameras):
                                     start_min5 = time.time()
                                     min5_defectHave.clear()
                                     min5_count.clear()
+                        if time.time() - csv_time > 300:
+                            csv_time = time.time()
+                            csv_write("OK", today, now, 1)
+                            csv_path = 'log/' + today + '_' + camera_name + '.csv'
+                            try:
+                                ftp_path = "RUB_crack/log/" + today + "_" + camera_name + ".csv"
+                                ftp_upload(csv_path, ftp_path)
+                            except:
+                                print("ftp server connect error")
+                                pass
                         #如果Alarm，存圖並上傳到FTP Server
                         if alarm_status:
-                            now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                            now = datetime.datetime.now().strftime("%Y%m%d %H%M%S")
+                            csv_write("NG", today, now, 1)
+                            csv_path = 'log/' + today + '_' + camera_name + '.csv'
                             alarm_status = False
                             img_box_path = output_path + "/NG/box/" + now + ".jpg"
                             img_nobox_path = output_path + "/NG/nobox/" + now + ".jpg"
@@ -245,6 +278,8 @@ if (cameras):
                                 ftp_upload(img_box_path, ftp_path)
                                 ftp_path = "RUB_crack/nobox/" + now + ".jpg" 
                                 ftp_upload(img_nobox_path, ftp_path)
+                                ftp_path = "RUB_crack/log/" + today + "_" + camera_name + ".csv"
+                                ftp_upload(csv_path, ftp_path)
                             except:
                                 print("ftp server connect error")
                                 pass
