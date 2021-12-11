@@ -13,9 +13,9 @@ def plc_connect():
 	global device
 	while True:
 		try:
-			device = pymcprotocol.Type3E(plctype="QnA")
-			device.setaccessopt(commtype="binary") #binary, ascii
-			device.connect("192.168.0.100", 1025)
+			device = pymcprotocol.Type3E(plctype="Q")
+			device.setaccessopt(commtype="ascii") #binary, ascii
+			device.connect("192.168.30.33", 5002)
 			print('PLC連線成功')
 			break
 		except:
@@ -28,6 +28,7 @@ def plc_read():
 	global exist_glass
 	try:
 		if device is not None:
+			#在籍:L1011；起始:M007273；結束:M007272
 			in_sensor = device.batchread_bitunits(headdevice="X21", readsize=1)[0] #batchread_wordunits
 			out_sensor = device.batchread_bitunits(headdevice="X20", readsize=1)[0]
 			exist_glass = device.batchread_bitunits(headdevice="X20", readsize=1)[0]
