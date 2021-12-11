@@ -31,14 +31,14 @@ initialize()
 cameras = getNumOfCameras()
 print("Number of cameras: %d" % cameras)
 
-fps_camera = 15 #相機FPS
+#fps_camera = 15 #相機FPS
 predict_path = "C:/Users/user/Desktop/RUB_img/"
 #width, height = image.size
 #裂點容許數量
-min1_crack_count = 1
-min5_crack_count = 1
+min1_crack_count = 2
+min5_crack_count = 4
 #裂點同一位置容許寬度
-crack_width = 4
+crack_width = 2
 #產生警戒區域遮罩
 warn_mask = np.zeros((768, 1024), dtype=np.uint8)
 #左上 右上 右下 左下
@@ -71,7 +71,7 @@ if (cameras):
         #cam.setEnumStringValue("TestPattern", "Off")
         # Int 偵數
         print("Frame Count:",cam.getIntValue("AcquisitionFrameCount"))
-        cam.setIntValue("AcquisitionFrameCount", fps_camera)
+        #cam.setIntValue("AcquisitionFrameCount", fps_camera)
         # Float 曝光時間
         print("Exposure Time:", cam.getFloatValue("ExposureTime"))
         #cam.setFloatValue("ExposureTime", 5000)
@@ -92,6 +92,8 @@ if (cameras):
             min5_count = []
             start_min1 = time.time()
             start_min5 = time.time()
+            find_crack_t1 = 0
+            find_crack_t5 = 0
             while(True):
                 time_now = str(datetime.date.today())
                 '''
@@ -118,132 +120,141 @@ if (cameras):
                 #predict
                 image = cv2.resize(img, (1024,768))
                 image_nobox = image.copy()
-                start = time.time()
-                classes, confidences, boxes = net.detect(image, confThreshold=0.85, nmsThreshold=0.5)
-                #print(time.time()-start)
-                alarm_status = False
-                if len(boxes) > 0:
-                    for classId, confidence, box in zip(classes.flatten(), confidences.flatten(), boxes):
-                        pstring = str(int(100 * confidence)) + "%"
-                        x_left, y_top, width, height = box
-                        
-                        boundingBox = [
-                            (x_left, y_top), #左上頂點
-                            (x_left, y_top + height), #左下頂點
-                            (x_left + width, y_top + height), #右下頂點
-                            (x_left + width, y_top) #右上頂點
-                        ]
-                        rectColor = (0, 0, 255)
-                        textCoord = (x_left, y_top - 10)
-                        x_center = x_left + int(width/2)
-                        y_center = y_top + int(height/2)
-                        #檢查瑕疵是否在光帶上
-                        if warn_mask[y_center][x_center] == 255:
-                            #print("on laser line")
-                            #檢查瑕疵是否在同一位置出現
-                            if not min1_defectContinue:
-                                find_crack_t1 = time.time()
-                                min1_defectContinue.append(x_center)
-                                min1_count.append(1)
-                            if not min5_defectHave:
-                                find_crack_t5 = time.time()
-                                min5_defectHave.append(x_center)
-                                min5_count.append(1)
-                            else:
-                                #判斷裂點是否在相同位置(1分鐘)
-                                is_crack = False
-                                for i in range(len(min1_defectContinue)):
-                                    if abs(x_center - min1_defectContinue[i]) < crack_width:
-                                        #是否在同一片上出現裂點
-                                        if time.time() - find_crack_t1 < 10:
-                                            break
-                                        find_crack_t1 = time.time()
-                                        is_crack = True
-                                        min1_count[i] = min1_count[i] + 1
-                                        print("min1 location", i,"crack count:", min1_count[i])
-                                        break
-                                if not is_crack:
+                image_light = image[warn_mask == 255]
+                image_light = np.mean(image_light)
+                #亮度大於設定值
+                if image_light > 15:
+                    start = time.time()
+                    classes, confidences, boxes = net.detect(image, confThreshold=0.85, nmsThreshold=0.5)
+                    #print(time.time()-start)
+                    alarm_status = False
+                    if len(boxes) > 0:
+                        for classId, confidence, box in zip(classes.flatten(), confidences.flatten(), boxes):
+                            pstring = str(int(100 * confidence)) + "%"
+                            x_left, y_top, width, height = box
+                            
+                            boundingBox = [
+                                (x_left, y_top), #左上頂點
+                                (x_left, y_top + height), #左下頂點
+                                (x_left + width, y_top + height), #右下頂點
+                                (x_left + width, y_top) #右上頂點
+                            ]
+                            rectColor = (0, 0, 255)
+                            textCoord = (x_left, y_top - 10)
+                            #在影像中標出Box邊界和類別、信心度
+                            cv2.rectangle(image, boundingBox[0], boundingBox[2], rectColor, 2)
+                            cv2.putText(image, pstring, textCoord, cv2.FONT_HERSHEY_DUPLEX, 1, rectColor, 2)
+                            
+                            x_center = x_left + int(width/2)
+                            y_center = y_top + int(height/2)
+                            #檢查瑕疵是否在光帶上
+                            if warn_mask[y_center][x_center] == 255:
+                                #print("on laser line")
+                                #檢查瑕疵是否在同一位置出現(1分鐘)
+                                if not min1_defectContinue:
+                                    print("min1 first")
+                                    find_crack_t1 = time.time()
                                     min1_defectContinue.append(x_center)
                                     min1_count.append(1)
-                                #判斷裂點是否在相同位置(5分鐘)
-                                is_crack = False
-                                for i in range(len(min5_defectHave)):
-                                    if abs(x_center - min5_defectHave[i]) < crack_width:
-                                        #是否在同一片上出現裂點
-                                        if time.time() - find_crack_t5 < 10:
+                                else:
+                                    #判斷裂點是否在相同位置(1分鐘)
+                                    is_crack = False
+                                    for i in range(len(min1_defectContinue)):
+                                        if abs(x_center - min1_defectContinue[i]) < crack_width:
+                                            is_crack = True
+                                            #是否在同一片上出現裂點
+                                            if time.time() - find_crack_t1 < 10:
+                                                break
+                                            find_crack_t1 = time.time()
+                                            min1_count[i] = min1_count[i] + 1
+                                            print("min1 location", i,"crack count:", min1_count[i])
                                             break
-                                        find_crack_t5 = time.time()
-                                        is_crack = True
-                                        min5_count[i] = min5_count[i] + 1
-                                        print("min5 location", i,"crack count:", min5_count[i])
+                                    if not is_crack:
+                                        min1_defectContinue.append(x_center)
+                                        min1_count.append(1)
+                                #判斷相同位置裂點是否大於2個(1分鐘)
+                                if time.time() - start_min1 < 60:
+                                    defect_sum = sum(i > min1_crack_count for i in min1_count)
+                                    if defect_sum > 0: 
+                                        #發報
+                                        alarm_status = True
+                                        start_min1 = time.time()
+                                        start_min5 = time.time()
+                                        min1_defectContinue.clear()
+                                        min5_defectHave.clear()
+                                        min1_count.clear()
+                                        min5_count.clear()
+                                        print("min1 Alarm")
                                         break
-                                if not is_crack:
+                                else:
+                                    start_min1 = time.time()
+                                    min1_defectContinue.clear()
+                                    min1_count.clear()
+                                
+                                if not min5_defectHave:
+                                    print("min5 first")
+                                    find_crack_t5 = time.time()
                                     min5_defectHave.append(x_center)
                                     min5_count.append(1)
-                            #判斷相同位置裂點是否大於3個(1分鐘)
-                            if time.time() - start_min1 < 60:
-                                defect_sum = sum(i > min1_crack_count for i in min1_count)
-                                if defect_sum > 0: 
-                                    #發報
-                                    alarm_status = True
-                                    start_min1 = time.time()
+                                else:
+                                    #判斷裂點是否在相同位置(5分鐘)
+                                    is_crack = False
+                                    for i in range(len(min5_defectHave)):
+                                        if abs(x_center - min5_defectHave[i]) < crack_width:
+                                            is_crack = True
+                                            #是否在同一片上出現裂點
+                                            if time.time() - find_crack_t5 < 10:
+                                                break
+                                            find_crack_t5 = time.time()
+                                            min5_count[i] = min5_count[i] + 1
+                                            print("min5 location", i,"crack count:", min5_count[i])
+                                            break
+                                    if not is_crack:
+                                        min5_defectHave.append(x_center)
+                                        min5_count.append(1)
+                                #判斷相同位置裂點是否大於4個(5分鐘)
+                                if time.time() - start_min5 < 300:
+                                    defect_sum = sum(i > min5_crack_count for i in min5_count)
+                                    if defect_sum > 0: 
+                                        #發報
+                                        alarm_status = True
+                                        start_min1 = time.time()
+                                        start_min5 = time.time()
+                                        min1_defectContinue.clear()
+                                        min5_defectHave.clear()
+                                        min1_count.clear()
+                                        min5_count.clear()
+                                        print("min5 Alarm")
+                                        break
+                                elif time.time() - start_min5 > 300:
                                     start_min5 = time.time()
-                                    min1_defectContinue = []
-                                    min5_defectHave = []
-                                    min1_count = []
-                                    min5_count = []
-                                    print("min1 Alarm")
-                            elif time.time() - start_min1 > 60:
-                                start_min1 = time.time()
-                                min1_defectContinue = []
-                                min1_count = []
-                            #判斷相同位置裂點是否大於4個(5分鐘)
-                            if time.time() - start_min5 < 300:
-                                defect_sum = sum(i > min5_crack_count for i in min5_count)
-                                if defect_sum > 0: 
-                                    #發報
-                                    alarm_status = True
-                                    start_min1 = time.time()
-                                    start_min5 = time.time()
-                                    min1_defectContinue = []
-                                    min5_defectHave = []
-                                    min1_count = []
-                                    min5_count = []
-                                    print("min5 Alarm")
-                            elif time.time() - start_min5 > 300:
-                                start_min5 = time.time()
-                                min5_defectHave = []
-                                min5_count = []
-                                
-                            if alarm_status: #int(100 * confidence) > 1:
-                                #在影像中標出Box邊界和類別、信心度
-                                cv2.rectangle(image, boundingBox[0], boundingBox[2], rectColor, 2)
-                                cv2.putText(image, pstring, textCoord, cv2.FONT_HERSHEY_DUPLEX, 1, rectColor, 2)
-                    #如果Alarm，存圖並上傳到FTP Server
-                    if alarm_status:
-                        now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        alarm_status = False
-                        img_box_path = output_path + "/NG/box/" + now + ".jpg"
-                        img_nobox_path = output_path + "/NG/nobox/" + now + ".jpg"
-                        cv2.imwrite(img_box_path, image)
-                        cv2.imwrite(img_nobox_path, image_nobox)
-                        #NG_img_count = NG_img_count + 1
-                        cv2.imshow('crack_cam1', image)
-                        try:
-                            ftp_path = "RUB_crack/box/" + now + ".jpg" 
-                            ftp_upload(img_box_path, ftp_path)
-                            ftp_path = "RUB_crack/nobox/" + now + ".jpg" 
-                            ftp_upload(img_nobox_path, ftp_path)
-                        except:
-                            print("ftp server connect error")
-                            pass
-                else:
-                    if time.time() - time_OK > 8:
-                        time_OK = time.time()
-                        #cv2.imshow('crack', image)
-                        output_path = predict_path + str(time_now)
-                        now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        cv2.imwrite(output_path + "/OK/" + now + ".jpg", image)
+                                    min5_defectHave.clear()
+                                    min5_count.clear()
+                        #如果Alarm，存圖並上傳到FTP Server
+                        if alarm_status:
+                            now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                            alarm_status = False
+                            img_box_path = output_path + "/NG/box/" + now + ".jpg"
+                            img_nobox_path = output_path + "/NG/nobox/" + now + ".jpg"
+                            cv2.imwrite(img_box_path, image)
+                            cv2.imwrite(img_nobox_path, image_nobox)
+                            #NG_img_count = NG_img_count + 1
+                            cv2.imshow('crack_cam1', image)
+                            try:
+                                ftp_path = "RUB_crack/box/" + now + ".jpg" 
+                                ftp_upload(img_box_path, ftp_path)
+                                ftp_path = "RUB_crack/nobox/" + now + ".jpg" 
+                                ftp_upload(img_nobox_path, ftp_path)
+                            except:
+                                print("ftp server connect error")
+                                pass
+                    else:
+                        if time.time() - time_OK > 16:
+                            time_OK = time.time()
+                            #cv2.imshow('crack', image)
+                            output_path = predict_path + str(time_now)
+                            now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                            cv2.imwrite(output_path + "/OK/" + now + ".jpg", image)
                 
                 '''
                 date_s_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
