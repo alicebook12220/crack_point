@@ -29,9 +29,9 @@ def plc_read():
 	try:
 		if device is not None:
 			#在籍:L1011；起始:M007273；結束:M007272
-			in_sensor = device.batchread_bitunits(headdevice="X21", readsize=1)[0] #batchread_wordunits
-			out_sensor = device.batchread_bitunits(headdevice="X20", readsize=1)[0]
-			exist_glass = device.batchread_bitunits(headdevice="X20", readsize=1)[0]
+			in_sensor = device.batchread_bitunits(headdevice="M007273", readsize=1)[0] #batchread_wordunits
+			out_sensor = device.batchread_bitunits(headdevice="M007272", readsize=1)[0]
+			exist_glass = device.batchread_bitunits(headdevice="L1011", readsize=1)[0]
 	except:
 		print('連線中斷，PLC嘗試重新連線')
 		device = None
