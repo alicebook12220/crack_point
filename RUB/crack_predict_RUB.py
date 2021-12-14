@@ -12,6 +12,8 @@ host = "192.168.3.100"
 username = "ftpuser"
 password = "ftp@12345678"
 camera_name = "camera_1"
+station_name = "RUB_crack"
+predict_path = "C:/Users/user/Desktop/" + station_name
 
 def ftp_upload(file_path, ftp_path):
     ftp_session = ftplib.FTP(host)
@@ -21,14 +23,16 @@ def ftp_upload(file_path, ftp_path):
     file.close()
     ftp_session.quit()
 
-def csv_write(mode="header", today="test", datetime="test", result=0):
+def csv_write(mode="header", today="test", result=0):
+    print("csv mode:", mode)
     data = ""
     if mode == "header":
         data = ['datetime', 'result']
     else:
-        data = [datetime, result]
+        now = datetime.datetime.now().strftime("%Y%m%d %H%M%S")
+        data = [now, result]
 
-    with open('log/' + today + '_' + camera_name + '.csv', 'a', encoding='UTF8', newline='') as f:
+    with open(predict_path + "/" + today + '/log/' + today + "_" + camera_name + '_result.csv', 'a', encoding='UTF8', newline='') as f:
         writer = csv.writer(f)
         # write the data
         writer.writerow(data)
@@ -46,7 +50,6 @@ cameras = getNumOfCameras()
 print("Number of cameras: %d" % cameras)
 
 #fps_camera = 15 #相機FPS
-predict_path = "C:/Users/user/Desktop/RUB_img/"
 #width, height = image.size
 #裂點容許數量
 min1_crack_count = 2
@@ -55,8 +58,8 @@ min5_crack_count = 4
 crack_width = 2
 #產生警戒區域遮罩
 warn_mask = np.zeros((768, 1024), dtype=np.uint8)
-#左上 右上 右下 左下
-roi_corners = np.array([[(0, 370), (1023, 340), (1023, 405), (0, 430)]], dtype=np.int32)
+#雷射光遮罩左上 右上 右下 左下
+roi_corners = np.array([[(0, 360), (1023, 360), (1023, 415), (0, 415)]], dtype=np.int32)
 channel_count = 1
 ignore_mask_color = (255,)*channel_count
 cv2.fillPoly(warn_mask, roi_corners, ignore_mask_color)
@@ -100,7 +103,6 @@ if (cameras):
         w = cam.waitForImage(2000)
         time_OK = time.time()
         csv_time = time.time()
-        #today_old = str(datetime.date.today())
         if (w):
             min1_defectContinue = []
             min5_defectHave = []
@@ -112,11 +114,6 @@ if (cameras):
             find_crack_t5 = 0
             while(True):
                 today = str(datetime.date.today())
-                isExists = os.path.exists(today + '_' + camera_name + '.csv')
-                if not isExists:
-                    csv_write("header", today)
-                #if today != today_old:
-                    
                 '''
                 if time_temp != time_now:
                     time_temp = time_now
@@ -128,7 +125,7 @@ if (cameras):
                 imshow = cv2.resize(img, (1024,768))
                 cv2.imshow('Realtime Show Cam1', imshow)
                 
-                output_path = predict_path + str(today)
+                output_path = predict_path + "/" + today
                 isExists = os.path.exists(output_path)
                 if not isExists:
                     #print("建立日期目錄:", today)
@@ -137,14 +134,34 @@ if (cameras):
                     #os.makedirs(output_path + "NG/")
                     os.makedirs(output_path + "/NG/box")
                     os.makedirs(output_path + "/NG/nobox")
-                
+                    os.makedirs(output_path + '/log')
+                isExists = os.path.exists(predict_path + "/" + today + '/log/' + today + "_" + camera_name + '_result.csv')
+                if not isExists:
+                    csv_write("header", today)
                 #predict
                 image = cv2.resize(img, (1024,768))
                 image_nobox = image.copy()
                 image_light = image[warn_mask == 255]
                 image_light = np.mean(image_light)
-                #亮度大於設定值
-                if image_light > 15:
+                if time.time() - csv_time > 14400: #14400
+                    csv_time = time.time()
+                    csv_write("OK", today, 0)
+                    csv_path = predict_path + "/" + today + '/log/' + today + "_" + camera_name + '_result.csv'
+                    try:
+                        ftp_path = "RUB_crack/log/" + today + "_" + camera_name + ".csv"
+                        ''''
+                        isExists = os.path.exists(output_path)
+                        if not isExists:
+                            #print("建立日期目錄:", today)
+                            #os.makedirs(output_path)
+                            os.makedirs(output_path + "/OK/")
+                        '''
+                        ftp_upload(csv_path, ftp_path)
+                    except:
+                        print("ftp server connect error")
+                        pass
+                print("image_light:",image_light)
+                if image_light > 1 and image_light < 20:
                     start = time.time()
                     classes, confidences, boxes = net.detect(image, confThreshold=0.85, nmsThreshold=0.5)
                     #print(time.time()-start)
@@ -251,21 +268,11 @@ if (cameras):
                                     start_min5 = time.time()
                                     min5_defectHave.clear()
                                     min5_count.clear()
-                        if time.time() - csv_time > 300:
-                            csv_time = time.time()
-                            csv_write("OK", today, now, 1)
-                            csv_path = 'log/' + today + '_' + camera_name + '.csv'
-                            try:
-                                ftp_path = "RUB_crack/log/" + today + "_" + camera_name + ".csv"
-                                ftp_upload(csv_path, ftp_path)
-                            except:
-                                print("ftp server connect error")
-                                pass
                         #如果Alarm，存圖並上傳到FTP Server
                         if alarm_status:
-                            now = datetime.datetime.now().strftime("%Y%m%d %H%M%S")
-                            csv_write("NG", today, now, 1)
-                            csv_path = 'log/' + today + '_' + camera_name + '.csv'
+                            now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                            csv_write("NG", today, 1)
+                            csv_path = predict_path + "/" + today + '/log/' + today + "_" + camera_name + '_result.csv'
                             alarm_status = False
                             img_box_path = output_path + "/NG/box/" + now + ".jpg"
                             img_nobox_path = output_path + "/NG/nobox/" + now + ".jpg"
@@ -287,7 +294,7 @@ if (cameras):
                         if time.time() - time_OK > 16:
                             time_OK = time.time()
                             #cv2.imshow('crack', image)
-                            output_path = predict_path + str(time_now)
+                            output_path = predict_path + "/" + today
                             now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                             cv2.imwrite(output_path + "/OK/" + now + ".jpg", image)
                 
