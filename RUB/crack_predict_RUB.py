@@ -9,6 +9,8 @@ import ftplib
 import csv
 import pymcprotocol
 import threading
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
 #import PLC
 
 host = "192.168.3.100"
@@ -96,6 +98,24 @@ def csv_write(mode="header", today="test", result=0, camera_name="camera_1"):
         # write the data
         writer.writerow(data)
 
+def point_map(map_path="", end_x="", point_x="", width=768, point_y=0, cam_num=1):
+    my_font = font_manager.FontProperties(fname=r"C:\Windows\Fonts\msjhbd.ttc", size=18) #微軟正黑體(粗)
+    plt.style.use("ggplot")     # 使用ggplot主題樣式
+    plt.xlabel("玻璃長度(以時間計算)", fontproperties=my_font)  #設定x座標標題
+    plt.ylabel("玻璃寬度(以像素計算)", fontproperties=my_font)  #設定y座標標題
+    plt.title("玻璃裂點位置圖", fontproperties=my_font)        #設定標題
+    plt.xlim(0, end_x)
+    plt.ylim(0, width*4)
+    
+    plt.scatter(point_x,     # x軸資料
+                point_y*cam_num,     # y軸資料
+                c = "m",     # 點顏色
+                s = 50,      # 點大小
+                alpha = .5,  # 透明度
+                marker = "D")   # 點樣式
+    print("point map save:", map_path)
+    plt.savefig(map_path)   #儲存圖檔
+    plt.close()      # 關閉圖表
 
 net = cv2.dnn_DetectionModel(
     'C:/Users/user/Desktop/crack_point/python/videoCapture/toshiba-teli-pekatvision-main/cfg/custom-yolov4-3l-tiny.cfg',
@@ -159,9 +179,12 @@ def crack_camera1():
     global exist_glass
     global glass_mode
     camera_name = "camera_1"
+    cam_number = 1
     glass_con_count = 0  # 連續玻璃數量
     glass_count = 0  # 玻璃數量
     glass_start = False
+    map_save = False
+    map_now = ""
     # fps_camera = 15 #相機FPS
     # width, height = image.size
     # 裂點容許數量
@@ -178,6 +201,11 @@ def crack_camera1():
     channel_count = 1
     ignore_mask_color = (255,) * channel_count
     cv2.fillPoly(warn_mask, roi_corners, ignore_mask_color)
+    #裂點MAP圖相關參數
+    start_time = ""
+    point_time = ""
+    end_time = ""
+    x_center = 0
     #PLC連線
     #plc_connect()
     # time_temp = str(datetime.date.today())
@@ -252,6 +280,7 @@ def crack_camera1():
                             glass_start = True
                             OK_save = True
                             time_OK = time.time()
+                            start_time = time.time()
                         classes, confidences, boxes = net.detect(image, confThreshold=0.80, nmsThreshold=0.5)
                         if len(boxes) > 0:
                             for classId, confidence, box in zip(classes.flatten(), confidences.flatten(), boxes):
@@ -305,6 +334,7 @@ def crack_camera1():
                                     if glass_con_count < 3:
                                         defect_sum = sum(i[0] > min1_crack_count for i in min1_count)
                                         if defect_sum > 0:
+                                            point_time = time.time()
                                             # 發報
                                             alarm_status = True
                                             min1_defectContinue.clear()
@@ -339,6 +369,7 @@ def crack_camera1():
                                     if glass_count < 10:
                                         defect_sum = sum(i[0] > min5_crack_count for i in min5_count)
                                         if defect_sum > 0:
+                                            point_time = time.time()
                                             # 發報
                                             alarm_status = True
                                             min1_defectContinue.clear()
@@ -353,7 +384,9 @@ def crack_camera1():
                                         min5_count.clear()
                             # 如果Alarm，存圖並上傳到FTP Server
                             if alarm_status:
+                                map_save = True
                                 now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                map_now = now
                                 csv_write("NG", today, 1, camera_name)
                                 csv_path = predict_path + "/" + today + '/log/' + today + "_" + camera_name + '_result.csv'
                                 img_box_path = output_path + "/NG/box/" + now + "_" + camera_name + ".jpg"
@@ -361,7 +394,7 @@ def crack_camera1():
                                 cv2.imwrite(img_box_path, image)
                                 cv2.imwrite(img_nobox_path, image_nobox)
                                 # NG_img_count = NG_img_count + 1
-                                cv2.imshow('crack_cam1', image)
+                                cv2.imshow('crack_' + camera_name, image)
                                 try:
                                     ftp_path = "RUB_crack/image/box/" + now + "_" + camera_name + ".jpg"
                                     ftp_upload(img_box_path, ftp_path)
@@ -386,7 +419,7 @@ def crack_camera1():
                             glass_start = False
                             glass_count = glass_count + 1
                             glass_con_count = glass_con_count + 1
-
+                            
                             if glass_con_count >= 3:
                                 glass_con_count = 0
                                 min1_defectContinue.clear()
@@ -411,7 +444,16 @@ def crack_camera1():
                                 except:
                                     print("ftp server connect error")
                                     pass
-                            
+                            if map_save:
+                                map_save = False
+                                #產生裂點MAP
+                                end_time = int(time.time() - start_time)
+                                point_time = int(point_time - start_time)
+                                map_path = predict_path + "/" + today + '/log/' + map_now + '_point_map.jpg'
+                                point_map(map_path, end_time, point_time, image.shape[1], x_center, cam_number)
+                                ftp_path = "RUB_crack/point_map/" + now + '_point_map.jpg'
+                                ftp_upload(map_path, ftp_path)
+                                
                             plc_write(defect_sum)
 
                     # Stop streaming
@@ -432,9 +474,12 @@ def crack_camera2():
     global exist_glass
     global glass_mode
     camera_name = "camera_2"
+    cam_number = 2
     glass_con_count = 0  # 連續玻璃數量
     glass_count = 0  # 玻璃數量
     glass_start = False
+    map_save = False
+    map_now = ""
     # fps_camera = 15 #相機FPS
     # width, height = image.size
     # 裂點容許數量
@@ -451,6 +496,11 @@ def crack_camera2():
     channel_count = 1
     ignore_mask_color = (255,) * channel_count
     cv2.fillPoly(warn_mask, roi_corners, ignore_mask_color)
+    #裂點MAP圖相關參數
+    start_time = ""
+    point_time = ""
+    end_time = ""
+    x_center = 0
     #PLC連線
     #plc_connect()
     # time_temp = str(datetime.date.today())
@@ -519,12 +569,13 @@ def crack_camera2():
                     alarm_status = False
                     defect_sum = 0
                     #print(exist_glass, in_sensor)
-                    if exist_glass == 1 and in_sensor == 1 and glass_mode != 0 and glass_mode != 2:
+                    if exist_glass == 1 and in_sensor == 1 and glass_mode == 1:
                         if not glass_start:
                             print(camera_name + "取像開始")
                             glass_start = True
                             OK_save = True
                             time_OK = time.time()
+                            start_time = time.time()
                         classes, confidences, boxes = net2.detect(image, confThreshold=0.80, nmsThreshold=0.5)
                         if len(boxes) > 0:
                             for classId, confidence, box in zip(classes.flatten(), confidences.flatten(), boxes):
@@ -578,6 +629,7 @@ def crack_camera2():
                                     if glass_con_count < 3:
                                         defect_sum = sum(i[0] > min1_crack_count for i in min1_count)
                                         if defect_sum > 0:
+                                            point_time = time.time()
                                             # 發報
                                             alarm_status = True
                                             min1_defectContinue.clear()
@@ -612,6 +664,7 @@ def crack_camera2():
                                     if glass_count < 10:
                                         defect_sum = sum(i[0] > min5_crack_count for i in min5_count)
                                         if defect_sum > 0:
+                                            point_time = time.time()
                                             # 發報
                                             alarm_status = True
                                             min1_defectContinue.clear()
@@ -626,7 +679,9 @@ def crack_camera2():
                                         min5_count.clear()
                             # 如果Alarm，存圖並上傳到FTP Server
                             if alarm_status:
+                                map_save = True
                                 now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                map_now = now
                                 csv_write("NG", today, 1, camera_name)
                                 csv_path = predict_path + "/" + today + '/log/' + today + "_" + camera_name + '_result.csv'
                                 img_box_path = output_path + "/NG/box/" + now + "_" + camera_name + ".jpg"
@@ -634,7 +689,7 @@ def crack_camera2():
                                 cv2.imwrite(img_box_path, image)
                                 cv2.imwrite(img_nobox_path, image_nobox)
                                 # NG_img_count = NG_img_count + 1
-                                cv2.imshow('crack_cam2', image)
+                                cv2.imshow('crack_' + camera_name, image)
                                 try:
                                     ftp_path = "RUB_crack/image/box/" + now + "_" + camera_name + ".jpg"
                                     ftp_upload(img_box_path, ftp_path)
@@ -659,7 +714,7 @@ def crack_camera2():
                             glass_start = False
                             glass_count = glass_count + 1
                             glass_con_count = glass_con_count + 1
-
+                            
                             if glass_con_count >= 3:
                                 glass_con_count = 0
                                 min1_defectContinue.clear()
@@ -684,7 +739,16 @@ def crack_camera2():
                                 except:
                                     print("ftp server connect error")
                                     pass
-                            
+                            if map_save:
+                                map_save = False
+                                #產生裂點MAP
+                                end_time = int(time.time() - start_time)
+                                point_time = int(point_time - start_time)
+                                map_path = predict_path + "/" + today + '/log/' + map_now + '_point_map.jpg'
+                                point_map(map_path, end_time, point_time, image.shape[1], x_center, cam_number)
+                                ftp_path = "RUB_crack/point_map/" + now + '_point_map.jpg'
+                                ftp_upload(map_path, ftp_path)
+                                
                             plc_write(defect_sum)
 
                     # Stop streaming
@@ -705,9 +769,12 @@ def crack_camera3():
     global exist_glass
     global glass_mode
     camera_name = "camera_3"
+    cam_number = 3
     glass_con_count = 0  # 連續玻璃數量
     glass_count = 0  # 玻璃數量
     glass_start = False
+    map_save = False
+    map_now = ""
     # fps_camera = 15 #相機FPS
     # width, height = image.size
     # 裂點容許數量
@@ -724,10 +791,16 @@ def crack_camera3():
     channel_count = 1
     ignore_mask_color = (255,) * channel_count
     cv2.fillPoly(warn_mask, roi_corners, ignore_mask_color)
+    #裂點MAP圖相關參數
+    start_time = ""
+    point_time = ""
+    end_time = ""
+    x_center = 0
     #PLC連線
     #plc_connect()
     # time_temp = str(datetime.date.today())
     if (cameras):
+        # Connect to Pekat
         # pekat = Pekat(host = "127.0.0.1", port = 8100, already_running = True)
         with Camera(2) as cam:
             # How to get and set properties
@@ -791,12 +864,13 @@ def crack_camera3():
                     alarm_status = False
                     defect_sum = 0
                     #print(exist_glass, in_sensor)
-                    if exist_glass == 1 and in_sensor == 1 and glass_mode != 0 and glass_mode != 2:
+                    if exist_glass == 1 and in_sensor == 1 and glass_mode == 1:
                         if not glass_start:
                             print(camera_name + "取像開始")
                             glass_start = True
                             OK_save = True
                             time_OK = time.time()
+                            start_time = time.time()
                         classes, confidences, boxes = net3.detect(image, confThreshold=0.80, nmsThreshold=0.5)
                         if len(boxes) > 0:
                             for classId, confidence, box in zip(classes.flatten(), confidences.flatten(), boxes):
@@ -850,6 +924,7 @@ def crack_camera3():
                                     if glass_con_count < 3:
                                         defect_sum = sum(i[0] > min1_crack_count for i in min1_count)
                                         if defect_sum > 0:
+                                            point_time = time.time()
                                             # 發報
                                             alarm_status = True
                                             min1_defectContinue.clear()
@@ -884,6 +959,7 @@ def crack_camera3():
                                     if glass_count < 10:
                                         defect_sum = sum(i[0] > min5_crack_count for i in min5_count)
                                         if defect_sum > 0:
+                                            point_time = time.time()
                                             # 發報
                                             alarm_status = True
                                             min1_defectContinue.clear()
@@ -898,7 +974,9 @@ def crack_camera3():
                                         min5_count.clear()
                             # 如果Alarm，存圖並上傳到FTP Server
                             if alarm_status:
+                                map_save = True
                                 now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                map_now = now
                                 csv_write("NG", today, 1, camera_name)
                                 csv_path = predict_path + "/" + today + '/log/' + today + "_" + camera_name + '_result.csv'
                                 img_box_path = output_path + "/NG/box/" + now + "_" + camera_name + ".jpg"
@@ -906,7 +984,7 @@ def crack_camera3():
                                 cv2.imwrite(img_box_path, image)
                                 cv2.imwrite(img_nobox_path, image_nobox)
                                 # NG_img_count = NG_img_count + 1
-                                cv2.imshow('crack_cam3', image)
+                                cv2.imshow('crack_' + camera_name, image)
                                 try:
                                     ftp_path = "RUB_crack/image/box/" + now + "_" + camera_name + ".jpg"
                                     ftp_upload(img_box_path, ftp_path)
@@ -931,7 +1009,7 @@ def crack_camera3():
                             glass_start = False
                             glass_count = glass_count + 1
                             glass_con_count = glass_con_count + 1
-
+                            
                             if glass_con_count >= 3:
                                 glass_con_count = 0
                                 min1_defectContinue.clear()
@@ -956,7 +1034,16 @@ def crack_camera3():
                                 except:
                                     print("ftp server connect error")
                                     pass
-                            
+                            if map_save:
+                                map_save = False
+                                #產生裂點MAP
+                                end_time = int(time.time() - start_time)
+                                point_time = int(point_time - start_time)
+                                map_path = predict_path + "/" + today + '/log/' + map_now + '_point_map.jpg'
+                                point_map(map_path, end_time, point_time, image.shape[1], x_center, cam_number)
+                                ftp_path = "RUB_crack/point_map/" + now + '_point_map.jpg'
+                                ftp_upload(map_path, ftp_path)
+                                
                             plc_write(defect_sum)
 
                     # Stop streaming
@@ -977,9 +1064,12 @@ def crack_camera4():
     global exist_glass
     global glass_mode
     camera_name = "camera_4"
+    cam_number = 4
     glass_con_count = 0  # 連續玻璃數量
     glass_count = 0  # 玻璃數量
     glass_start = False
+    map_save = False
+    map_now = ""
     # fps_camera = 15 #相機FPS
     # width, height = image.size
     # 裂點容許數量
@@ -996,10 +1086,16 @@ def crack_camera4():
     channel_count = 1
     ignore_mask_color = (255,) * channel_count
     cv2.fillPoly(warn_mask, roi_corners, ignore_mask_color)
+    #裂點MAP圖相關參數
+    start_time = ""
+    point_time = ""
+    end_time = ""
+    x_center = 0
     #PLC連線
     #plc_connect()
     # time_temp = str(datetime.date.today())
     if (cameras):
+        # Connect to Pekat
         # pekat = Pekat(host = "127.0.0.1", port = 8100, already_running = True)
         with Camera(0) as cam:
             # How to get and set properties
@@ -1063,12 +1159,13 @@ def crack_camera4():
                     alarm_status = False
                     defect_sum = 0
                     #print(exist_glass, in_sensor)
-                    if exist_glass == 1 and in_sensor == 1 and glass_mode != 0 and glass_mode != 2:
+                    if exist_glass == 1 and in_sensor == 1 and glass_mode == 1:
                         if not glass_start:
                             print(camera_name + "取像開始")
                             glass_start = True
                             OK_save = True
                             time_OK = time.time()
+                            start_time = time.time()
                         classes, confidences, boxes = net4.detect(image, confThreshold=0.80, nmsThreshold=0.5)
                         if len(boxes) > 0:
                             for classId, confidence, box in zip(classes.flatten(), confidences.flatten(), boxes):
@@ -1122,6 +1219,7 @@ def crack_camera4():
                                     if glass_con_count < 3:
                                         defect_sum = sum(i[0] > min1_crack_count for i in min1_count)
                                         if defect_sum > 0:
+                                            point_time = time.time()
                                             # 發報
                                             alarm_status = True
                                             min1_defectContinue.clear()
@@ -1156,6 +1254,7 @@ def crack_camera4():
                                     if glass_count < 10:
                                         defect_sum = sum(i[0] > min5_crack_count for i in min5_count)
                                         if defect_sum > 0:
+                                            point_time = time.time()
                                             # 發報
                                             alarm_status = True
                                             min1_defectContinue.clear()
@@ -1170,7 +1269,9 @@ def crack_camera4():
                                         min5_count.clear()
                             # 如果Alarm，存圖並上傳到FTP Server
                             if alarm_status:
+                                map_save = True
                                 now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                map_now = now
                                 csv_write("NG", today, 1, camera_name)
                                 csv_path = predict_path + "/" + today + '/log/' + today + "_" + camera_name + '_result.csv'
                                 img_box_path = output_path + "/NG/box/" + now + "_" + camera_name + ".jpg"
@@ -1178,7 +1279,7 @@ def crack_camera4():
                                 cv2.imwrite(img_box_path, image)
                                 cv2.imwrite(img_nobox_path, image_nobox)
                                 # NG_img_count = NG_img_count + 1
-                                cv2.imshow('crack_cam4', image)
+                                cv2.imshow('crack_' + camera_name, image)
                                 try:
                                     ftp_path = "RUB_crack/image/box/" + now + "_" + camera_name + ".jpg"
                                     ftp_upload(img_box_path, ftp_path)
@@ -1203,7 +1304,7 @@ def crack_camera4():
                             glass_start = False
                             glass_count = glass_count + 1
                             glass_con_count = glass_con_count + 1
-
+                            
                             if glass_con_count >= 3:
                                 glass_con_count = 0
                                 min1_defectContinue.clear()
@@ -1228,7 +1329,16 @@ def crack_camera4():
                                 except:
                                     print("ftp server connect error")
                                     pass
-                            
+                            if map_save:
+                                map_save = False
+                                #產生裂點MAP
+                                end_time = int(time.time() - start_time)
+                                point_time = int(point_time - start_time)
+                                map_path = predict_path + "/" + today + '/log/' + map_now + '_point_map.jpg'
+                                point_map(map_path, end_time, point_time, image.shape[1], x_center, cam_number)
+                                ftp_path = "RUB_crack/point_map/" + now + '_point_map.jpg'
+                                ftp_upload(map_path, ftp_path)
+                                
                             plc_write(defect_sum)
 
                     # Stop streaming
@@ -1241,6 +1351,7 @@ def crack_camera4():
                 print("Image not received in time")
 
     terminate()
+
 PLC = threading.Thread(target = PLC_RUN)
 cam1 = threading.Thread(target = crack_camera1)
 cam2 = threading.Thread(target = crack_camera2)
@@ -1252,3 +1363,4 @@ cam2.start()
 cam3.start()
 cam4.start()
 PLC.start()
+
